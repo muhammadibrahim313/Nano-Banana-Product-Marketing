@@ -314,29 +314,7 @@ def main():
             type=["png", "jpg", "jpeg"],
             help="Upload a high-quality product image. Works best with products on transparent or simple backgrounds."
         )
-        # Add this inside your main() function where you want the image to appear
-    st.markdown("### 🌟 Success Story Preview")
-
-    st.image(
-    "https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG",
-    caption="Before → After | Nano Banana Hackathon",
-    use_container_width=True
-)
-
-# Styling with borders and center alignment
-    st.markdown("""
-<div style="
-    display: flex;
-    justify-content: center;
-    margin-top: 20px;
-    margin-bottom: 30px;
-">
-    <img src="https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG"
-         style="border: 4px solid #667eea; border-radius: 20px; box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5); max-width: 80%;"/>
-</div>
-""", unsafe_allow_html=True)
-
-
+        
         if uploaded:
             st.session_state['product_img'] = uploaded
             st.session_state['started'] = True
@@ -353,7 +331,28 @@ def main():
             st.markdown("---")
             brand_config = render_brand_sidebar()
             st.session_state['brand_config'] = brand_config
-        
+        # Add this inside your main() function where you want the image to appear
+        st.markdown("### 🌟 Success Story Preview")
+
+        st.image(
+    "https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG",
+    caption="Before → After | Nano Banana Hackathon",
+    use_container_width=True
+)
+
+# Styling with borders and center alignment
+        st.markdown("""
+<div style="
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    margin-bottom: 30px;
+">
+    <img src="https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG"
+         style="border: 4px solid #667eea; border-radius: 20px; box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5); max-width: 80%;"/>
+</div>
+""", unsafe_allow_html=True)
+
         # Main content tabs
         tabs = st.tabs([
             "🎨 Generate Assets",
