@@ -355,29 +355,51 @@ def render_chat_interface(gemini_handler):
                 # Process chat request
                 with st.spinner("✨ Processing your request..."):
                     try:
-                        edited_image = gemini_handler.chat_edit(
-                            user_input,
-                            st.session_state['selected_image_for_chat']['image']
-                        )
+                        # Get the image from the selected data - FIXED ERROR HANDLING
+                        selected_data = st.session_state['selected_image_for_chat']
                         
-                        # Add to chat history
-                        if 'chat_history' not in st.session_state:
-                            st.session_state['chat_history'] = []
+                        # Extract the actual image from various possible structures
+                        image_to_edit = None
                         
-                        st.session_state['chat_history'].append({
-                            'role': 'user',
-                            'content': user_input
-                        })
+                        if isinstance(selected_data, dict):
+                            # Try different possible keys
+                            for key in ['image', 'img', 'data', 'file']:
+                                if key in selected_data:
+                                    image_to_edit = selected_data[key]
+                                    break
+                        else:
+                            # If it's directly an image
+                            image_to_edit = selected_data
                         
-                        st.session_state['chat_history'].append({
-                            'role': 'assistant',
-                            'content': "Here's your edited image!",
-                            'image': edited_image
-                        })
-                        
-                        st.rerun()
+                        if image_to_edit is None:
+                            st.error("Could not find image in selected data. Please try selecting again.")
+                        else:
+                            edited_image = gemini_handler.chat_edit(
+                                user_input,
+                                image_to_edit
+                            )
+                            
+                            # Add to chat history
+                            if 'chat_history' not in st.session_state:
+                                st.session_state['chat_history'] = []
+                            
+                            st.session_state['chat_history'].append({
+                                'role': 'user',
+                                'content': user_input
+                            })
+                            
+                            st.session_state['chat_history'].append({
+                                'role': 'assistant',
+                                'content': "Here's your edited image!",
+                                'image': edited_image
+                            })
+                            
+                            # Clear the input
+                            st.session_state['chat_input'] = ""
+                            st.rerun()
                     except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                        st.error(f"Error processing request: {str(e)}")
+                        st.info("Please try selecting the image again from the gallery.")
             elif not user_input:
                 st.warning("Please enter a request")
             else:
