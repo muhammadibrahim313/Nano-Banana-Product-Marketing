@@ -100,10 +100,11 @@ class GeminiHandler:
         enhanced_prompt = f"""
         {user_request}
         
-        IMPORTANT: 
-        - Maintain the product's visibility and branding
-        - Keep any text on the product packaging clear and legible
-        - Apply the requested changes while preserving product integrity
+        CRITICAL RULES: 
+        - DO NOT change the product itself - keep the EXACT same product from the image
+        - Only modify the background, lighting, props, or scene around the product
+        - Maintain the product's shape, color, branding, and all text exactly as shown
+        - The product must remain the central focus
         - Ensure high quality photorealistic output
         """
         
@@ -196,40 +197,46 @@ Website Banner, Ad Creative, and Testimonial Graphic."""
         brand_name = brand_config.get('brandName', 'the brand')
         product_name = brand_config.get('productName', 'product')
         
-        prompt = f"""Create a {aspect_ratios[asset_type]} photorealistic {asset_type} 
-for the {product_name} from {brand_name}.
+        prompt = f"""Create a {aspect_ratios[asset_type]} photorealistic marketing {asset_type}.
 
-CRITICAL REQUIREMENTS:
-1. The product image provided must be the central focus
-2. Product must be clearly visible and not obscured
-3. {"ENSURE THE BRAND NAME '" + brand_name + "' IS CLEARLY VISIBLE ON THE PRODUCT PACKAGING/LABEL" if ensure_brand_text else ""}
-4. The product text/label must be legible and eye-catching
-5. DO NOT add any overlay text or captions - only show the product's actual packaging text
-6. Create a premium, professional marketing image
+ABSOLUTELY CRITICAL REQUIREMENTS - MUST FOLLOW:
+1. USE THE EXACT PRODUCT FROM THE PROVIDED IMAGE - DO NOT CREATE A NEW PRODUCT
+2. The product in the image MUST remain EXACTLY the same - same shape, same color, same packaging, same text
+3. DO NOT generate a different product or change any aspect of the product itself
+4. Only change the BACKGROUND, SCENE, PROPS, and LIGHTING around the product
+5. The product from the image must be the central focus in the new scene
+6. {"Ensure any text on the product (including brand name '" + brand_name + "') remains clearly visible" if ensure_brand_text else "Keep product text visible"}
+7. Place the EXACT SAME product from the reference image into a new marketing scene
 
-Visual Style: {style_descriptions.get(style_preset, style_descriptions['Luxury'])}
+What you CAN change:
+- Background environment and colors
+- Surface the product sits on
+- Props and decorative elements around the product
+- Lighting and shadows
+- Overall composition and angle (but keep the same product)
 
-Brand Guidelines:
+What you CANNOT change:
+- The product itself (must be identical to the input image)
+- Product shape, color, or packaging design
+- Any text or labels on the product
+- Product material or texture
+
+Visual Style for the SCENE (not the product): {style_descriptions.get(style_preset, style_descriptions['Luxury'])}
+
+Brand Guidelines for the SCENE:
 - Tone: {brand_config.get('brandTone', 'Modern and sophisticated')}
-- Color Palette: {brand_config.get('colorTheme', 'Neutral and elegant')}
+- Color Palette FOR BACKGROUND: {brand_config.get('colorTheme', 'Neutral and elegant')}
 - Product Placement: {brand_config.get('productPlacement', 'Center-focused with props')}
 - Composition: {brand_config.get('compositionGuidelines', 'Balanced and clean')}
 
-Specific for {asset_type}:
-- Create a scene that highlights the product beautifully
-- Use appropriate lighting and props for the brand aesthetic
-- Ensure the composition works for the {aspect_ratios[asset_type]} format
-{"- Include subtle lifestyle elements suggesting customer satisfaction" if asset_type == "Testimonial Graphic" else ""}
-{"- Perfect for Instagram feed with eye-catching composition" if asset_type == "Instagram Post" else ""}
-{"- Optimized for vertical mobile viewing" if asset_type == "Instagram Story" else ""}
-{"- Wide cinematic composition for web headers" if asset_type == "Website Banner" else ""}
-{"- Bold and attention-grabbing for social media ads" if asset_type == "Ad Creative" else ""}
+Specific requirements for {asset_type}:
+{"- Create an eye-catching square composition perfect for Instagram feed" if asset_type == "Instagram Post" else ""}
+{"- Design for vertical mobile viewing with the product prominently displayed" if asset_type == "Instagram Story" else ""}
+{"- Create a wide cinematic scene with the product as hero element" if asset_type == "Website Banner" else ""}
+{"- Make it bold and attention-grabbing for social media advertising" if asset_type == "Ad Creative" else ""}
+{"- Design a testimonial-ready scene with elegant, trustworthy atmosphere" if asset_type == "Testimonial Graphic" else ""}
 
-Remember: 
-- Product packaging text must be clearly readable
-- The brand name should be prominent and visible
-- Maintain photorealistic quality
-- No added text overlays, only the product's actual branding"""
+FINAL REMINDER: Use the EXACT product from the provided image. Only create a new scene/background around it."""
         
         return prompt
     
@@ -255,79 +262,108 @@ Remember:
         customer_name: str,
         product_name: str
     ) -> Image.Image:
-        """Add testimonial text overlay to image"""
+        """Add elegant testimonial text overlay to image"""
         img = image.copy()
-        draw = ImageDraw.Draw(img)
         width, height = img.size
         
-        # Try to load a nice font, fallback to default
+        # Create a new image with gradient overlay
+        overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        
+        # Create gradient overlay at bottom third
+        overlay_height = height // 2
+        gradient_start = height - overlay_height
+        
+        for y in range(gradient_start, height):
+            # Calculate alpha based on position
+            progress = (y - gradient_start) / overlay_height
+            alpha = int(180 + (50 * progress))  # From 180 to 230
+            
+            # Draw gradient line
+            draw.rectangle([(0, y), (width, y+1)], fill=(20, 20, 30, alpha))
+        
+        # Composite the gradient
+        img = Image.alpha_composite(img, overlay)
+        draw = ImageDraw.Draw(img)
+        
+        # Load fonts
         try:
             # Try different font sizes based on image size
-            font_size = max(int(height * 0.03), 20)
-            small_font_size = max(int(height * 0.02), 16)
+            quote_size = max(int(height * 0.035), 24)
+            name_size = max(int(height * 0.025), 18)
+            product_size = max(int(height * 0.02), 16)
             
-            font = ImageFont.truetype("DejaVuSans.ttf", size=font_size)
-            small_font = ImageFont.truetype("DejaVuSans.ttf", size=small_font_size)
+            quote_font = ImageFont.truetype("DejaVuSans.ttf", size=quote_size)
+            name_font = ImageFont.truetype("DejaVuSans.ttf", size=name_size)
+            product_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=product_size)
         except:
             try:
-                # Try Arial as fallback
-                font = ImageFont.truetype("arial.ttf", size=30)
-                small_font = ImageFont.truetype("arial.ttf", size=20)
+                quote_font = ImageFont.truetype("arial.ttf", size=30)
+                name_font = ImageFont.truetype("arial.ttf", size=22)
+                product_font = ImageFont.truetype("arialbd.ttf", size=18)
             except:
-                font = ImageFont.load_default()
-                small_font = font
+                quote_font = ImageFont.load_default()
+                name_font = quote_font
+                product_font = quote_font
         
-        # Add semi-transparent overlay at bottom
-        overlay_height = height // 3
-        overlay = Image.new('RGBA', (width, overlay_height), (0, 0, 0, 200))
-        
-        # Gradient overlay for better visibility
-        for y in range(overlay_height):
-            alpha = int(200 * (1 - y / overlay_height * 0.3))
-            for x in range(width):
-                overlay.putpixel((x, y), (0, 0, 0, alpha))
-        
-        img.paste(overlay, (0, height - overlay_height), overlay)
-        
-        # Add quote text
+        # Add quote with better positioning
         if quote:
-            # Clean quote
+            # Clean and format quote
             quote = quote.strip()
             if not quote.startswith('"'):
                 quote = f'"{quote}"'
             
-            # Wrap text based on image width
-            max_width = width - 60  # 30px margin on each side
-            wrapped = self._wrap_text(draw, quote, font, max_width)
+            # Calculate text area
+            margin = width // 12
+            max_width = width - (2 * margin)
             
-            y_text = height - overlay_height + 30
+            # Wrap text
+            wrapped = self._wrap_text(draw, quote, quote_font, max_width)
             
+            # Calculate starting Y position for center alignment in bottom area
+            total_height = len(wrapped) * (quote_size + 10)
+            if customer_name:
+                total_height += name_size + 20
+            if product_name:
+                total_height += product_size + 10
+            
+            y_start = gradient_start + (overlay_height - total_height) // 2
+            y_text = max(y_start, gradient_start + 30)
+            
+            # Draw quote lines with shadow effect
             for line in wrapped:
-                # Add shadow for better readability
-                shadow_offset = 2
-                draw.text((30 + shadow_offset, y_text + shadow_offset), 
-                         line, font=font, fill=(0, 0, 0, 150))
-                draw.text((30, y_text), line, font=font, fill=(255, 255, 255, 255))
+                # Shadow
+                for offset in [(2, 2), (-1, -1), (1, 1)]:
+                    draw.text((margin + offset[0], y_text + offset[1]), 
+                             line, font=quote_font, fill=(0, 0, 0, 100))
                 
-                bbox = draw.textbbox((0, 0), line, font=font)
-                line_height = bbox[3] - bbox[1]
-                y_text += line_height + 10
+                # Main text
+                draw.text((margin, y_text), line, font=quote_font, 
+                         fill=(255, 255, 255, 250))
+                y_text += quote_size + 10
             
-            # Add attribution
+            # Add spacing before attribution
+            y_text += 15
+            
+            # Add customer name with style
             if customer_name:
                 attribution = f"— {customer_name}"
-                draw.text((30 + 2, y_text + 10 + 2), attribution, 
-                         font=small_font, fill=(0, 0, 0, 150))
-                draw.text((30, y_text + 10), attribution, 
-                         font=small_font, fill=(255, 255, 255, 230))
-                y_text += 30
+                # Shadow
+                draw.text((margin + 2, y_text + 2), attribution, 
+                         font=name_font, fill=(0, 0, 0, 100))
+                # Main text
+                draw.text((margin, y_text), attribution, 
+                         font=name_font, fill=(255, 255, 255, 220))
+                y_text += name_size + 10
             
-            # Add product name
+            # Add product name with accent color
             if product_name:
-                draw.text((30 + 2, y_text + 10 + 2), product_name, 
-                         font=small_font, fill=(0, 0, 0, 150))
-                draw.text((30, y_text + 10), product_name, 
-                         font=small_font, fill=(255, 200, 100, 255))
+                # Shadow
+                draw.text((margin + 2, y_text + 2), product_name, 
+                         font=product_font, fill=(0, 0, 0, 100))
+                # Main text with brand color
+                draw.text((margin, y_text), product_name, 
+                         font=product_font, fill=(255, 215, 100, 255))
         
         return img
     
@@ -401,11 +437,11 @@ Remember:
             },
             {
                 "assetType": "Testimonial Graphic",
-                "backgroundTone": "warm beige with soft shadows",
-                "surfaceType": "textured paper background",
-                "accentProp": "subtle botanical illustrations",
-                "lighting": "soft, even lighting",
-                "cameraAngle": "centered, balanced composition",
+                "backgroundTone": "soft beige with warm undertones",
+                "surfaceType": "textured linen or silk fabric",
+                "accentProp": "subtle floral arrangements",
+                "lighting": "soft, diffused window light",
+                "cameraAngle": "slightly elevated, centered composition",
                 "suggestedText": "Real results from real customers"
             }
         ]
