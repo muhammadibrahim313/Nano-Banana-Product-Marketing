@@ -2,7 +2,16 @@ import streamlit as st
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+# Add this at the top of app.py after imports
+import streamlit as st
 
+# Try to load from .env first (local), then from st.secrets (cloud)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    API_KEY = os.getenv("GEMINI_API_KEY")
+except:
+    API_KEY = st.secrets.get("GEMINI_API_KEY", None)
 # Import custom modules
 from utils import init_session_state, get_sample_images
 from ui_components import (
