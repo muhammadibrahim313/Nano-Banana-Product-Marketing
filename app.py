@@ -61,6 +61,10 @@ def ensure_font(size: int) -> ImageFont.FreeTypeFont:
     except Exception:
         return ImageFont.load_default()
 
+def _rgba_from_name(name: str):
+    # map "black"/"white" to RGBA tuples (PIL-friendly)
+    return (0, 0, 0, 255) if str(name).lower() == "black" else (255, 255, 255, 255)
+
 def draw_overlay_text(
     base: Image.Image,
     quote: str,
@@ -141,10 +145,10 @@ def draw_overlay_text(
 
         wrapped = wrap_text(t, font, max_width)
         for wline in wrapped:
-            # drop shadow for readability
+            # drop shadow for readability — use RGBA tuple, not "rgba(...)"
             if shadow:
-                draw.text((x+2, y+2), wline, font=font, fill="rgba(0,0,0,0.25)")
-            draw.text((x, y), wline, font=font, fill=color)
+                draw.text((x+2, y+2), wline, font=font, fill=(0, 0, 0, 64))
+            draw.text((x, y), wline, font=font, fill=_rgba_from_name(color))
             y += fsize + int(line_spacing * 0.5)
         y += int(line_spacing * 0.4)
 
@@ -287,6 +291,9 @@ with st.sidebar:
     try:
         styles = json.loads(styles_text)
         assets = styles.get("assets", [])
+        # allow a single-object case too
+        if isinstance(assets, dict):
+            assets = [assets]
     except Exception as e:
         st.error(f"Styles JSON invalid: {e}")
         assets = []
@@ -319,9 +326,13 @@ with tabs[0]:
     if "results" in st.session_state:
         st.write("")
         for r in st.session_state["results"]:
-            at = r["asset"]["assetType"]
+            at = r.get("asset", {}).get("assetType", "Asset")
+            img = r.get("image") or r.get("composite") or r.get("preview")
+            if img is None:
+                st.warning(f"{at}: missing image in results (skipped).")
+                continue
             st.markdown(f"**{at}**")
-            st.image(r["image"], use_container_width=True)
+            st.image(img, use_container_width=True)
             st.divider()
 
 with tabs[1]:
@@ -330,13 +341,17 @@ with tabs[1]:
         st.info("Generate something first on the 'Generate' tab.")
     else:
         for idx, r in enumerate(st.session_state["results"]):
-            asset = r["asset"]
-            atype = asset["assetType"]
+            asset = r.get("asset", {})
+            atype = asset.get("assetType", f"Asset {idx+1}")
             st.markdown(f"#### {atype}")
 
             c1, c2, c3 = st.columns([3,2,2])
             with c1:
-                st.image(r["image"], use_container_width=True)
+                orig = r.get("image") or r.get("composite") or r.get("preview")
+                if orig is None:
+                    st.warning(f"{atype}: no image available—regenerate this item.")
+                    continue
+                st.image(orig, use_container_width=True)
 
             with c2:
                 st.write("Aspect preset")
@@ -347,7 +362,7 @@ with tabs[1]:
                 )
 
                 # apply crop
-                base = r["image"]
+                base = orig
                 if aspect_opt == "1:1 (Post/Testimonial)":
                     base = aspect_crop(base, (1,1))
                 elif aspect_opt == "9:16 (Story)":
@@ -398,8 +413,11 @@ with tabs[2]:
         st.info("Generate first.")
     else:
         for idx, r in enumerate(st.session_state["results"]):
-            at = r["asset"]["assetType"]
-            final_img = r.get("preview", r["image"])
+            at = r.get("asset", {}).get("assetType", f"Asset {idx+1}")
+            final_img = r.get("preview") or r.get("image") or r.get("composite")
+            if final_img is None:
+                st.warning(f"{at}: nothing to export—skipped.")
+                continue
             st.markdown(f"**{at}**")
             st.image(final_img, use_container_width=True)
             st.download_button(
