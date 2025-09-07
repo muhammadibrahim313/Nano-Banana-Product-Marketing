@@ -283,6 +283,26 @@ def main():
     if not st.session_state.get('started', False):
         render_hero_section()
         
+        # Before/After Showcase
+        st.markdown("### ✨ See The Magic - Before & After")
+        st.markdown("""
+        <div style="
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            border: 2px solid rgba(102, 126, 234, 0.5);
+            border-radius: 20px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+        ">
+            <img src="https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG" 
+                 style="width: 100%; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);"
+                 alt="Before and After - Product Transformation">
+            <p style="text-align: center; color: #ffffff; margin-top: 15px; font-size: 1.1rem;">
+                <strong>Transform simple products into professional marketing assets with automatic brand labeling!</strong>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
         # Sample images selection
         st.markdown("### 🎯 Quick Start with Sample Products")
         st.info("Select a sample product or upload your own below")
