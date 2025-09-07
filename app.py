@@ -278,6 +278,29 @@ def main():
     if st.session_state.get('started', False):
         st.markdown('<div class="app-header">🎨 Nano Banana Studio - AI Marketing Asset Creator</div>', 
                    unsafe_allow_html=True)
+    # Add this inside your main() function where you want the image to appear
+st.markdown("### 🌟 Success Story Preview")
+
+st.image(
+    "https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG",
+    caption="Before → After | Nano Banana Hackathon",
+    use_container_width=True
+)
+
+# Styling with borders and center alignment
+st.markdown("""
+<div style="
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    margin-bottom: 30px;
+">
+    <img src="https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG"
+         style="border: 4px solid #667eea; border-radius: 20px; box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5); max-width: 80%;"/>
+</div>
+""", unsafe_allow_html=True)
+
+        
     
     # Hero Section for new users
     if not st.session_state.get('started', False):
