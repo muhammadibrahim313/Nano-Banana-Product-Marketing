@@ -1,5 +1,6 @@
 # 🎨 Nano Banana Studio - AI Marketing Asset Creator
 
+![](https://raw.githubusercontent.com/muhammadibrahim313/Nano-Banana-Product-Marketing/refs/heads/main/sample_images/Capture.PNG)
 Transform your product images into stunning marketing assets using Google's Gemini Nano Banana model.
 
 ## ✨ Features
