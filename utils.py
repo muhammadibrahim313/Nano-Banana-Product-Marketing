@@ -37,48 +37,66 @@ def get_sample_images() -> List[Tuple[str, str, str]]:
     samples_dir.mkdir(exist_ok=True)
     
     # List of sample images (name, path, description)
+    # These should be actual product images - user needs to add them
     samples = [
         (
-            "Luxury Serum",
-            "sample_images/serum.png",
-            "Premium skincare serum bottle"
+            "Premium Serum",
+            "sample_images/serum_bottle.png",
+            "Luxury skincare serum with dropper"
         ),
         (
-            "Natural Cream",
-            "sample_images/cream.png",
-            "Organic face cream jar"
+            "Face Cream",
+            "sample_images/cream_jar.png",
+            "Rich moisturizing cream jar"
         ),
         (
-            "Tech Device",
-            "sample_images/device.png",
-            "Modern tech product"
+            "Beauty Oil",
+            "sample_images/beauty_oil.png",
+            "Nourishing facial oil bottle"
         )
     ]
     
-    # Create placeholder images if they don't exist
+    # Check if images exist, create info placeholder if not
     for name, path, desc in samples:
         if not Path(path).exists():
-            # Create a simple placeholder image
-            img = Image.new('RGBA', (500, 500), color=(230, 230, 230, 255))
+            # Create a gradient placeholder with instructions
+            img = Image.new('RGBA', (500, 500), color=(0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            
+            # Create gradient background
+            for y in range(500):
+                color_value = int(80 + (y / 500) * 50)
+                draw.rectangle([(0, y), (500, y+1)], 
+                             fill=(color_value, color_value, color_value+20, 255))
+            
+            # Add text
             try:
-                from PIL import ImageDraw, ImageFont
-                draw = ImageDraw.Draw(img)
-                # Add text
-                text = name
-                try:
-                    font = ImageFont.truetype("DejaVuSans.ttf", 40)
-                except:
-                    font = ImageFont.load_default()
-                
-                # Center text
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                text_height = bbox[3] - bbox[1]
-                x = (500 - text_width) // 2
-                y = (500 - text_height) // 2
-                draw.text((x, y), text, fill=(100, 100, 100, 255), font=font)
+                font = ImageFont.truetype("DejaVuSans.ttf", 30)
+                small_font = ImageFont.truetype("DejaVuSans.ttf", 20)
             except:
-                pass
+                font = ImageFont.load_default()
+                small_font = font
+            
+            # Draw product name
+            text = name
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            x = (500 - text_width) // 2
+            draw.text((x, 200), text, fill=(255, 255, 255, 255), font=font)
+            
+            # Add instruction
+            instruction = "Add product image"
+            bbox = draw.textbbox((0, 0), instruction, font=small_font)
+            text_width = bbox[2] - bbox[0]
+            x = (500 - text_width) // 2
+            draw.text((x, 250), instruction, fill=(200, 200, 200, 255), font=small_font)
+            
+            # Add file path
+            file_text = f"to {path}"
+            bbox = draw.textbbox((0, 0), file_text, font=small_font)
+            text_width = bbox[2] - bbox[0]
+            x = (500 - text_width) // 2
+            draw.text((x, 280), file_text, fill=(180, 180, 180, 255), font=small_font)
             
             # Save placeholder
             img.save(path)
