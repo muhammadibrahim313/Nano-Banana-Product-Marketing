@@ -1,285 +1,414 @@
-import os, io, json, base64
+import os, io, json, base64, textwrap
+from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
-import streamlit as st
-from PIL import Image
-from dotenv import load_dotenv
 
-# --- Gemini SDK ---
-# Docs & quickstart: https://googleapis.github.io/python-genai/  (SDK)
-# Image generation:   https://ai.google.dev/gemini-api/docs/image-generation
-# Inline images:      https://ai.google.dev/gemini-api/docs/image-understanding
+import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
+from dotenv import load_dotenv
 from google import genai
+
+# ---------- Config ----------
+APP_NAME = "Capsula Creative – Nano Banana Assets"
+IMAGE_MODEL = "gemini-2.5-flash-image-preview"   # Nano Banana
+TEXT_MODEL  = "gemini-2.5-flash"
 
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
-    st.error("GEMINI_API_KEY missing in .env")
+    st.error("Missing GEMINI_API_KEY in .env. Add it and restart.")
     st.stop()
 
 client = genai.Client(api_key=API_KEY)
+st.set_page_config(page_title=APP_NAME, layout="wide")
+st.title("🍌 Nano Banana – Product Marketing Assets")
 
-IMAGE_MODEL = "gemini-2.5-flash-image-preview"   # Nano Banana
-TEXT_MODEL  = "gemini-2.5-flash"                 # for JSON styling hints
-
-st.set_page_config(page_title="Nano Banana – Product Assets", layout="wide")
-st.title("🍌 Nano Banana – Product Marketing Assets Generator")
-
-# ---------------------------
-# Helpers
-# ---------------------------
-def pil_image_from_upload(file) -> Image.Image:
+# ---------- Utilities ----------
+def pil_from_upload(file) -> Image.Image:
     img = Image.open(file).convert("RGBA")
     return img
 
-def save_pil_get_bytes(img: Image.Image, fmt="PNG") -> bytes:
-    buf = io.BytesIO()
-    img.save(buf, format=fmt)
-    return buf.getvalue()
+def img_bytes(img: Image.Image, fmt="PNG") -> bytes:
+    b = io.BytesIO()
+    img.save(b, format=fmt)
+    return b.getvalue()
+
+def aspect_crop(img: Image.Image, target_ratio: Tuple[int,int]) -> Image.Image:
+    """Center-crop to the given w:h ratio (e.g., (1,1), (9,16), (16,9))."""
+    w, h = img.size
+    tr_w, tr_h = target_ratio
+    target = tr_w / tr_h
+    current = w / h
+
+    if abs(current - target) < 1e-6:
+        return img.copy()
+
+    if current > target:
+        # too wide → crop width
+        new_w = int(h * target)
+        left = (w - new_w) // 2
+        box = (left, 0, left + new_w, h)
+    else:
+        # too tall → crop height
+        new_h = int(w / target)
+        top = (h - new_h) // 2
+        box = (0, top, w, top + new_h)
+    return img.crop(box)
+
+def ensure_font(size: int) -> ImageFont.FreeTypeFont:
+    # Prefer DejaVu (bundled often); fall back to default bitmap
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size=size)
+    except Exception:
+        return ImageFont.load_default()
+
+def draw_overlay_text(
+    base: Image.Image,
+    quote: str,
+    client_name: str,
+    product_name: str,
+    color: str = "black",
+    shadow: bool = True,
+    left_margin_ratio: float = 0.06,
+    top_margin_ratio: float = 0.10,
+    wrap_ratio: float = 0.44,
+) -> Image.Image:
+    """
+    Deterministic overlay renderer so the model never writes text.
+    - Sanitizes placeholders like [Client Name]
+    - Smart quotes around the quote
+    """
+    img = base.copy().convert("RGBA")
+    W, H = img.size
+    draw = ImageDraw.Draw(img)
+
+    # Sanitize
+    def clean(s: str) -> str:
+        s = (s or "").strip()
+        # remove [] placeholders if user left them in
+        s = s.replace("[", "").replace("]", "")
+        return s
+
+    quote = clean(quote)
+    client_name = clean(client_name)
+    product_name = clean(product_name)
+
+    # Compose lines
+    lines = []
+    if quote:
+        lines.append(f"“{quote}”")
+    if client_name:
+        lines.append(f"— {client_name}")
+    if product_name:
+        lines.append(product_name)
+
+    if not lines:
+        return img  # nothing to draw
+
+    # Layout
+    x = int(W * left_margin_ratio)
+    y = int(H * top_margin_ratio)
+    max_width = int(W * wrap_ratio)
+
+    # Adaptive font sizing
+    base_size = max(int(min(W, H) * 0.04), 18)  # scale with image
+    font = ensure_font(base_size)
+
+    def wrap_text(text, font, max_w):
+        words = text.split()
+        wrapped = []
+        line = ""
+        for w in words:
+            test = f"{line} {w}".strip()
+            if draw.textlength(test, font=font) <= max_w:
+                line = test
+            else:
+                if line:
+                    wrapped.append(line)
+                line = w
+        if line:
+            wrapped.append(line)
+        return wrapped
+
+    # Draw lines with spacing
+    line_spacing = int(base_size * 0.6)
+    for idx, t in enumerate(lines):
+        # shrink font if line is too wide
+        fsize = base_size
+        font = ensure_font(fsize)
+        while draw.textlength(t, font=font) > max_width and fsize > 10:
+            fsize -= 1
+            font = ensure_font(fsize)
+
+        wrapped = wrap_text(t, font, max_width)
+        for wline in wrapped:
+            # drop shadow for readability
+            if shadow:
+                draw.text((x+2, y+2), wline, font=font, fill="rgba(0,0,0,0.25)")
+            draw.text((x, y), wline, font=font, fill=color)
+            y += fsize + int(line_spacing * 0.5)
+        y += int(line_spacing * 0.4)
+
+    return img
 
 def gemini_generate_image(prompt_text: str,
                           product_image: Optional[Image.Image] = None) -> Image.Image:
     """
-    Calls Gemini 2.5 Flash Image with text-only or text + reference image.
-    The SDK supports passing PIL images directly in contents.
+    Image gen / edit via Nano Banana. We pass the reference product image
+    so composition respects branding, but we tell the model NOT to add text.
     """
-    contents = [prompt_text]
+    contents: List = [prompt_text]
     if product_image is not None:
         contents.append(product_image)
 
-    # Using the models interface per SDK docs / dev blog sample
     resp = client.models.generate_content(
         model=IMAGE_MODEL,
         contents=contents,
     )
 
-    # Find first inline image in response parts
+    # Extract first inline image
     for cand in resp.candidates:
         for part in cand.content.parts:
             if getattr(part, "inline_data", None) and getattr(part.inline_data, "data", None):
-                # part.inline_data.data is bytes already in SDK; ensure PIL opens it
                 data = part.inline_data.data
                 if isinstance(data, str):
                     data = base64.b64decode(data)
                 return Image.open(io.BytesIO(data)).convert("RGBA")
 
-    raise RuntimeError("No image returned by the model")
+    raise RuntimeError("No image returned by the model.")
 
-def gemini_suggest_styles(product_name: str,
-                          tagline: str,
-                          brand: Dict[str, str],
-                          category: str,
-                          benefit: str) -> Dict[str, Any]:
-    """
-    Ask the text model to return a JSON structure for 5 assets.
-    We keep it simple: prompt to output JSON only.
-    """
+def gemini_style_json(product_name: str, tagline: str, brand: Dict[str,str],
+                      category: str, benefit: str) -> Dict:
     sys = (
-        "You are a luxury product photographer and stylist. "
-        "Return JSON only. No prose. Keys: assets["
-        "{assetType,backgroundTone,surfaceType,accentProp,lighting,cameraAngle,overlayText}]. "
-        "Asset types: Instagram Post, Instagram Story, Website Banner, Ad Creative, Testimonial Graphic. "
-        "Vary background/surface/prop/lighting/angle per asset; keep a cohesive campaign vibe."
+        "You are a luxury product photographer/stylist. "
+        "Return JSON ONLY (no prose). Shape: "
+        "{\"assets\":[{\"assetType\":\"Instagram Post|Instagram Story|Website Banner|Ad Creative|Testimonial Graphic\","
+        "\"backgroundTone\":\"...\",\"surfaceType\":\"...\",\"accentProp\":\"...\",\"lighting\":\"...\","
+        "\"cameraAngle\":\"...\",\"overlayText\":\"...\"}]}. "
+        "Vary each field by asset; keep campaign cohesion."
     )
     user = (
-        f"Product Name: {product_name}\n"
-        f"Tagline: {tagline}\n"
-        f"Brand: {brand.get('brandName')}\n"
-        f"Tone: {brand.get('brandTone')}\n"
-        f"Category: {category}\n"
-        f"Benefit: {benefit}\n"
-        f"Color palette: {brand.get('colorTheme')}\n"
-        f"Placement: {brand.get('productPlacement')}\n"
-        f"Composition: {brand.get('compositionGuidelines')}\n"
-        "Return the JSON now."
+        f"Product: {product_name}\nTagline: {tagline}\n"
+        f"Brand: {brand['brandName']}\nTone: {brand['brandTone']}\n"
+        f"Palette: {brand['colorTheme']}\nCategory: {category}\nBenefit: {benefit}\n"
+        f"Placement: {brand['productPlacement']}\n"
+        f"Composition: {brand['compositionGuidelines']}\n"
+        "Return JSON now."
     )
 
-    resp = client.models.generate_content(
-        model=TEXT_MODEL,
-        contents=[sys, user],
-    )
+    resp = client.models.generate_content(model=TEXT_MODEL, contents=[sys, user])
 
     txt = ""
-    for cand in resp.candidates:
-        for part in cand.content.parts:
-            if getattr(part, "text", None):
-                txt += part.text
-
-    # Attempt to extract JSON
+    for c in resp.candidates:
+        for p in c.content.parts:
+            if getattr(p, "text", None):
+                txt += p.text
     txt = txt.strip().strip("`")
-    # Handle fenced code blocks if any
     if txt.startswith("json"):
         txt = txt[4:]
     try:
-        data = json.loads(txt)
+        return json.loads(txt)
     except Exception:
-        # fallback default
-        data = {
-            "assets": [
-                {
-                  "assetType":"Instagram Post",
-                  "backgroundTone":"soft blush gradient",
-                  "surfaceType":"satin draped cloth",
-                  "accentProp":"gold-trimmed ribbon",
-                  "lighting":"warm side spotlight",
-                  "cameraAngle":"45-degree angle",
-                  "overlayText":"Glow deeper. Shine brighter."
-                },
-                {
-                  "assetType":"Instagram Story",
-                  "backgroundTone":"pale lavender with light streaks",
-                  "surfaceType":"textured ceramic tray",
-                  "accentProp":"scattered rose petals",
-                  "lighting":"top-down diffused glow",
-                  "cameraAngle":"overhead close-up",
-                  "overlayText":"Hydration you can feel."
-                },
-                {
-                  "assetType":"Website Banner",
-                  "backgroundTone":"muted green stone",
-                  "surfaceType":"brushed concrete slab",
-                  "accentProp":"eucalyptus branch",
-                  "lighting":"soft angled morning light",
-                  "cameraAngle":"side-profile landscape",
-                  "overlayText":"Glow like never before!"
-                },
-                {
-                  "assetType":"Ad Creative",
-                  "backgroundTone":"deep emerald gradient",
-                  "surfaceType":"reflective glass base",
-                  "accentProp":"frosted crystal orb",
-                  "lighting":"dramatic backlight",
-                  "cameraAngle":"elevated 3/4 angle",
-                  "overlayText":"10% Off Today Only"
-                },
-                {
-                  "assetType":"Testimonial Graphic",
-                  "backgroundTone":"cream linen",
-                  "surfaceType":"polished marble",
-                  "accentProp":"single white tulip",
-                  "lighting":"natural side lighting",
-                  "cameraAngle":"straight-on clean view",
-                  "overlayText":"“My skin has never felt this good.”"
-                }
+        # Safe default
+        return {
+            "assets":[
+                {"assetType":"Instagram Post","backgroundTone":"soft blush gradient","surfaceType":"satin draped cloth",
+                 "accentProp":"gold-trimmed ribbon","lighting":"warm side spotlight","cameraAngle":"45-degree angle",
+                 "overlayText":"Glow deeper. Shine brighter."},
+                {"assetType":"Instagram Story","backgroundTone":"pale lavender","surfaceType":"ceramic tray",
+                 "accentProp":"rose petals","lighting":"diffused top-down","cameraAngle":"overhead close-up",
+                 "overlayText":"Hydration you can feel."},
+                {"assetType":"Website Banner","backgroundTone":"muted green stone","surfaceType":"concrete slab",
+                 "accentProp":"eucalyptus branch","lighting":"soft morning light","cameraAngle":"side-profile landscape",
+                 "overlayText":"Glow like never before!"},
+                {"assetType":"Ad Creative","backgroundTone":"deep emerald gradient","surfaceType":"reflective glass",
+                 "accentProp":"crystal orb","lighting":"dramatic backlight","cameraAngle":"elevated 3/4",
+                 "overlayText":"10% Off Today Only"},
+                {"assetType":"Testimonial Graphic","backgroundTone":"cream linen","surfaceType":"polished marble",
+                 "accentProp":"single white tulip","lighting":"natural side light","cameraAngle":"straight-on clean",
+                 "overlayText":"My skin has never felt this good."}
             ]
         }
-    return data
 
-def build_prompt(asset, brand, product_name, tagline) -> str:
+def build_prompt(asset: Dict, brand: Dict, product_name: str) -> str:
+    ar = "vertical 9:16" if asset["assetType"]=="Instagram Story" else ("16:9" if asset["assetType"]=="Website Banner" else "square 1:1")
     return (
-        f"Create a { 'vertical 9:16' if asset['assetType']=='Instagram Story' else 'square 1:1' } "
-        f"photorealistic **{asset['assetType']}** for the skincare product {product_name} "
-        f"from {brand['brandName']}. "
-        "The product image is provided; keep label and product unchanged and legible; "
-        "integrate it into a premium, minimal scene.\n\n"
-        f"Background: {asset['backgroundTone']}. "
-        f"Surface: {asset['surfaceType']}. "
-        f"Add a tasteful prop: {asset['accentProp']}. "
-        f"Lighting: {asset['lighting']}. "
-        f"Camera angle: {asset['cameraAngle']}. "
-        "Keep composition clean, brand-first, with generous negative space.\n\n"
+        f"Create a {ar} photorealistic {asset['assetType']} for the skincare product {product_name} "
+        f"from {brand['brandName']}. The product image is provided as reference; keep the product unchanged and legible. "
+        "Do not add any text overlay. Compose a premium, minimal scene.\n\n"
+        f"Background: {asset['backgroundTone']}. Surface: {asset['surfaceType']}. "
+        f"Add a tasteful prop: {asset['accentProp']}. Lighting: {asset['lighting']}. "
+        f"Camera angle: {asset['cameraAngle']}.\n\n"
         "Brand constraints:\n"
-        f"- Tone: {brand['brandTone']}\n"
-        f"- Color palette: {brand['colorTheme']}\n"
-        f"- Product placement: {brand['productPlacement']}\n"
-        f"- Composition: {brand['compositionGuidelines']}\n\n"
-        f'Optional overlay text: "{asset["overlayText"]}" (legible, elegant, harmonious). '
-        "If adding text, maintain crisp typography and contrast. "
+        f"- Tone: {brand['brandTone']}\n- Palette: {brand['colorTheme']}\n"
+        f"- Placement: {brand['productPlacement']}\n- Composition: {brand['compositionGuidelines']}\n"
         "Return one high-quality image."
     )
 
-# ---------------------------
-# UI – left: form; right: outputs
-# ---------------------------
+# ---------- Sidebar (left-to-right flow) ----------
 with st.sidebar:
-    st.header("Brand Settings")
+    st.header("① Upload & Brand")
+    uploaded = st.file_uploader("Upload product image (PNG/JPG)", type=["png","jpg","jpeg"])
+    product_img = pil_from_upload(uploaded) if uploaded else None
+    if product_img:
+        st.image(product_img, caption="Product reference", use_container_width=True)
+
+    st.markdown("---")
     default_brand = {
-      "brandName": "Capsula",
-      "brandTone": "Modern biotech luxury — innovative, pure, immersive.",
-      "colorTheme": "Coral blush, teal turquoise, deep emerald, warm beige, onyx black.",
-      "productPlacement": "On geometric pedestals or refined vanity with sparse organic props.",
-      "compositionGuidelines": "Clean symmetry for single-product; dynamic off-center for lifestyle; generous negative space."
+        "brandName":"Capsula",
+        "brandTone":"Modern biotech luxury — innovative, pure, immersive.",
+        "colorTheme":"Coral blush, teal turquoise, deep emerald, warm beige, onyx black.",
+        "productPlacement":"Geometric pedestals or refined vanity; sparse organic props.",
+        "compositionGuidelines":"Clean symmetry for single-product; off-center for lifestyle; generous negative space."
     }
     brand = {}
     brand["brandName"] = st.text_input("Brand name", default_brand["brandName"])
-    brand["brandTone"] = st.text_area("Brand tone", default_brand["brandTone"], height=70)
-    brand["colorTheme"] = st.text_area("Color palette", default_brand["colorTheme"], height=60)
+    brand["brandTone"] = st.text_area("Tone", default_brand["brandTone"], height=70)
+    brand["colorTheme"] = st.text_area("Palette", default_brand["colorTheme"], height=60)
     brand["productPlacement"] = st.text_area("Placement rules", default_brand["productPlacement"], height=60)
-    brand["compositionGuidelines"] = st.text_area("Composition rules", default_brand["compositionGuidelines"], height=80)
+    brand["compositionGuidelines"] = st.text_area("Composition", default_brand["compositionGuidelines"], height=80)
 
-st.subheader("1) Product & Campaign Form")
+    st.markdown("---")
+    st.header("② Quote & Labels (Overlay)")
+    quote = st.text_area("Quote (no placeholders)", "My skin has never felt this good—truly a game-changer!")
+    client_name = st.text_input("Attribution (optional)", "")
+    product_name = st.text_input("Product name", "Capsula Serum X")
+    overlay_color = st.selectbox("Overlay color", ["black","white"])
+    st.caption("Overlay text is rendered by the app (not by the model), so no [Client Name] leaks.")
 
-col1, col2 = st.columns([2,1])
-with col1:
-    product_name = st.text_input("What's the product's name?", "Capsula Serum X")
-    tagline      = st.text_input("What is the product tagline?", "Glow deeper. Shine brighter.")
-    category     = st.text_input("Product category", "Serum")
-    benefit      = st.text_input("What is the benefit of the product?", "Deep hydration and barrier repair.")
-with col2:
-    uploaded = st.file_uploader("Upload product image (PNG/JPG)", type=["png","jpg","jpeg"])
-    if uploaded:
-        product_img = pil_image_from_upload(uploaded)
-        st.image(product_img, caption="Product reference", use_column_width=True)
-    else:
-        product_img = None
+    st.markdown("---")
+    st.header("③ Style JSON")
+    if st.button("Suggest styles with Gemini"):
+        st.session_state["styles"] = gemini_style_json(product_name, "", brand, "Skincare", "Hydration & barrier repair")
 
-st.markdown("---")
-st.subheader("2) Style Plan (JSON)")
-colA, colB = st.columns([1,1])
-with colA:
-    if st.button("Suggest styles with Gemini (JSON)"):
-        st.session_state["styles"] = gemini_suggest_styles(product_name, tagline, brand, category, benefit)
-
-with colB:
     if "styles" not in st.session_state:
-        st.session_state["styles"] = {"assets": []}
-    styles_json = st.text_area(
-        "Edit or paste styles JSON (assets[5])",
-        value=json.dumps(st.session_state["styles"], indent=2),
-        height=300
-    )
+        st.session_state["styles"] = {"assets":[]}
+    styles_text = st.text_area("Edit styles JSON", json.dumps(st.session_state["styles"], indent=2), height=280)
 
-# validate JSON
-try:
-    style_plan = json.loads(styles_json)
-    assets = style_plan.get("assets", [])
-except Exception as e:
-    st.error(f"Styles JSON invalid: {e}")
-    assets = []
+    try:
+        styles = json.loads(styles_text)
+        assets = styles.get("assets", [])
+    except Exception as e:
+        st.error(f"Styles JSON invalid: {e}")
+        assets = []
 
-st.markdown("---")
-st.subheader("3) Generate Assets")
-gen_col1, gen_col2 = st.columns([1,1])
-go = gen_col1.button("Generate all assets")
-note = gen_col2.checkbox("Use product image as reference (recommended)", value=True)
+# ---------- Main content ----------
+tabs = st.tabs(["Generate", "Edit & Overlay", "Export"])
+with tabs[0]:
+    st.subheader("Generate Assets")
+    colA, colB = st.columns([1,1])
+    with colA:
+        use_ref = st.checkbox("Use uploaded product as reference", value=True)
+    with colB:
+        start = st.button("Generate all")
 
-if go:
-    if not product_img and note:
-        st.warning("Upload a product image or uncheck the reference option.")
+    if start:
+        if use_ref and product_img is None:
+            st.warning("Upload a product image or uncheck 'Use as reference'.")
+        else:
+            st.session_state["results"] = []
+            prog = st.progress(0)
+            for i, asset in enumerate(assets):
+                prompt = build_prompt(asset, brand, product_name)
+                try:
+                    out = gemini_generate_image(prompt, product_img if use_ref else None)
+                    st.session_state["results"].append({"asset": asset, "image": out})
+                except Exception as e:
+                    st.error(f"{asset.get('assetType','Asset')} failed: {e}")
+                prog.progress(int((i+1)/max(1,len(assets))*100))
+
+    if "results" in st.session_state:
+        st.write("")
+        for r in st.session_state["results"]:
+            at = r["asset"]["assetType"]
+            st.markdown(f"**{at}**")
+            st.image(r["image"], use_container_width=True)
+            st.divider()
+
+with tabs[1]:
+    st.subheader("Per-asset Editing & Overlay")
+    if "results" not in st.session_state or not st.session_state["results"]:
+        st.info("Generate something first on the 'Generate' tab.")
     else:
-        results = []
-        prog = st.progress(0)
-        for idx, asset in enumerate(assets):
-            prompt = build_prompt(asset, brand, product_name, tagline)
-            ref_img = product_img if note else None
-            try:
-                out_img = gemini_generate_image(prompt, ref_img)
-                results.append((asset["assetType"], out_img))
-            except Exception as e:
-                st.error(f"{asset.get('assetType','Asset')} failed: {e}")
-            prog.progress(int((idx+1)/max(1,len(assets))*100))
-        st.session_state["results"] = results
+        for idx, r in enumerate(st.session_state["results"]):
+            asset = r["asset"]
+            atype = asset["assetType"]
+            st.markdown(f"#### {atype}")
 
-# ---------------------------
-# Gallery + downloads
-# ---------------------------
-if "results" in st.session_state and st.session_state["results"]:
-    st.markdown("### 4) Results")
-    for asset_type, img in st.session_state["results"]:
-        st.write(f"**{asset_type}**")
-        st.image(img, use_column_width=True)
-        fn = f"{asset_type.lower().replace(' ','_')}.png"
-        st.download_button("Download PNG", data=save_pil_get_bytes(img), file_name=fn, mime="image/png")
-        st.markdown("---")
+            c1, c2, c3 = st.columns([3,2,2])
+            with c1:
+                st.image(r["image"], use_container_width=True)
 
-st.caption("Powered by Gemini 2.5 Flash Image (Nano Banana). All outputs include invisible SynthID watermarks. 🪪")
+            with c2:
+                st.write("Aspect preset")
+                aspect_opt = st.selectbox(
+                    f"Aspect · {atype}",
+                    ["Keep", "1:1 (Post/Testimonial)", "9:16 (Story)", "16:9 (Banner)"],
+                    key=f"aspect_{idx}"
+                )
+
+                # apply crop
+                base = r["image"]
+                if aspect_opt == "1:1 (Post/Testimonial)":
+                    base = aspect_crop(base, (1,1))
+                elif aspect_opt == "9:16 (Story)":
+                    base = aspect_crop(base, (9,16))
+                elif aspect_opt == "16:9 (Banner)":
+                    base = aspect_crop(base, (16,9))
+
+                st.write("Overlay")
+                with_overlay = st.checkbox("Add quote overlay", value=(atype=="Testimonial Graphic"), key=f"ol_{idx}")
+                if with_overlay:
+                    preview = draw_overlay_text(
+                        base, quote=quote, client_name=client_name,
+                        product_name=product_name, color=overlay_color
+                    )
+                else:
+                    preview = base
+
+                st.image(preview, caption="Preview", use_container_width=True)
+                st.session_state["results"][idx]["preview"] = preview
+
+            with c3:
+                st.write("Targeted edit")
+                edit_txt = st.text_area(
+                    f"Edit instruction ({atype})",
+                    "Only soften shadows; preserve product label, background, and composition.",
+                    height=100, key=f"edit_{idx}"
+                )
+                if st.button(f"Apply edit to {atype}", key=f"apply_{idx}"):
+                    try:
+                        edited = gemini_generate_image(
+                            f"{edit_txt} Do not add any text. Return one image.",
+                            product_image=base
+                        )
+                        # reapply overlay if chosen
+                        if with_overlay:
+                            edited = draw_overlay_text(
+                                aspect_crop(edited, (1,1)) if aspect_opt.startswith("1:1") else edited,
+                                quote=quote, client_name=client_name, product_name=product_name, color=overlay_color
+                            )
+                        st.session_state["results"][idx]["preview"] = edited
+                        st.success("Edit applied.")
+                    except Exception as e:
+                        st.error(f"Edit failed: {e}")
+
+with tabs[2]:
+    st.subheader("Export")
+    if "results" not in st.session_state or not st.session_state["results"]:
+        st.info("Generate first.")
+    else:
+        for idx, r in enumerate(st.session_state["results"]):
+            at = r["asset"]["assetType"]
+            final_img = r.get("preview", r["image"])
+            st.markdown(f"**{at}**")
+            st.image(final_img, use_container_width=True)
+            st.download_button(
+                "Download PNG",
+                data=img_bytes(final_img),
+                file_name=f"{at.lower().replace(' ','_')}.png",
+                mime="image/png",
+                key=f"dl_{idx}"
+            )
+            st.divider()
+
+st.caption("Built with Gemini 2.5 Flash Image (Nano Banana). Outputs include invisible SynthID watermarks.")
