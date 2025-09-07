@@ -266,104 +266,90 @@ FINAL REMINDER: Use the EXACT product from the provided image. Only create a new
         img = image.copy()
         width, height = img.size
         
-        # Create a new image with gradient overlay
+        # Create a new image for overlay
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
+        overlay_draw = ImageDraw.Draw(overlay)
         
-        # Create gradient overlay at bottom third
-        overlay_height = height // 2
-        gradient_start = height - overlay_height
+        # Create semi-transparent dark band at bottom (not gradient)
+        band_height = height // 3
+        band_top = height - band_height
         
-        for y in range(gradient_start, height):
-            # Calculate alpha based on position
-            progress = (y - gradient_start) / overlay_height
-            alpha = int(180 + (50 * progress))  # From 180 to 230
-            
-            # Draw gradient line
-            draw.rectangle([(0, y), (width, y+1)], fill=(20, 20, 30, alpha))
+        # Draw a solid semi-transparent rectangle
+        overlay_draw.rectangle(
+            [(0, band_top), (width, height)],
+            fill=(25, 25, 35, 220)  # Dark with high opacity
+        )
         
-        # Composite the gradient
+        # Add subtle top edge line for definition
+        overlay_draw.rectangle(
+            [(0, band_top), (width, band_top + 2)],
+            fill=(102, 126, 234, 150)  # Purple accent line
+        )
+        
+        # Composite the overlay
         img = Image.alpha_composite(img, overlay)
         draw = ImageDraw.Draw(img)
         
         # Load fonts
         try:
-            # Try different font sizes based on image size
-            quote_size = max(int(height * 0.035), 24)
-            name_size = max(int(height * 0.025), 18)
-            product_size = max(int(height * 0.02), 16)
+            quote_size = max(int(height * 0.03), 22)
+            name_size = max(int(height * 0.022), 18)
+            product_size = max(int(height * 0.018), 16)
             
             quote_font = ImageFont.truetype("DejaVuSans.ttf", size=quote_size)
             name_font = ImageFont.truetype("DejaVuSans.ttf", size=name_size)
             product_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=product_size)
         except:
-            try:
-                quote_font = ImageFont.truetype("arial.ttf", size=30)
-                name_font = ImageFont.truetype("arial.ttf", size=22)
-                product_font = ImageFont.truetype("arialbd.ttf", size=18)
-            except:
-                quote_font = ImageFont.load_default()
-                name_font = quote_font
-                product_font = quote_font
+            quote_font = ImageFont.load_default()
+            name_font = quote_font
+            product_font = quote_font
         
         # Add quote with better positioning
         if quote:
-            # Clean and format quote
             quote = quote.strip()
             if not quote.startswith('"'):
                 quote = f'"{quote}"'
             
             # Calculate text area
-            margin = width // 12
+            margin = width // 15
             max_width = width - (2 * margin)
             
             # Wrap text
             wrapped = self._wrap_text(draw, quote, quote_font, max_width)
             
-            # Calculate starting Y position for center alignment in bottom area
-            total_height = len(wrapped) * (quote_size + 10)
+            # Calculate vertical centering in the band
+            line_height = quote_size + 8
+            text_block_height = len(wrapped) * line_height
             if customer_name:
-                total_height += name_size + 20
+                text_block_height += name_size + 15
             if product_name:
-                total_height += product_size + 10
+                text_block_height += product_size + 10
             
-            y_start = gradient_start + (overlay_height - total_height) // 2
-            y_text = max(y_start, gradient_start + 30)
+            # Start position (centered in band)
+            y_text = band_top + (band_height - text_block_height) // 2
+            y_text = max(y_text, band_top + 20)  # Ensure minimum padding
             
-            # Draw quote lines with shadow effect
+            # Draw quote lines
             for line in wrapped:
-                # Shadow
-                for offset in [(2, 2), (-1, -1), (1, 1)]:
-                    draw.text((margin + offset[0], y_text + offset[1]), 
-                             line, font=quote_font, fill=(0, 0, 0, 100))
-                
-                # Main text
+                # Draw white text directly (no shadow for cleaner look)
                 draw.text((margin, y_text), line, font=quote_font, 
-                         fill=(255, 255, 255, 250))
-                y_text += quote_size + 10
+                         fill=(255, 255, 255, 255))
+                y_text += line_height
             
             # Add spacing before attribution
-            y_text += 15
+            y_text += 10
             
-            # Add customer name with style
+            # Add customer name
             if customer_name:
                 attribution = f"— {customer_name}"
-                # Shadow
-                draw.text((margin + 2, y_text + 2), attribution, 
-                         font=name_font, fill=(0, 0, 0, 100))
-                # Main text
                 draw.text((margin, y_text), attribution, 
-                         font=name_font, fill=(255, 255, 255, 220))
-                y_text += name_size + 10
+                         font=name_font, fill=(255, 255, 255, 200))
+                y_text += name_size + 8
             
             # Add product name with accent color
             if product_name:
-                # Shadow
-                draw.text((margin + 2, y_text + 2), product_name, 
-                         font=product_font, fill=(0, 0, 0, 100))
-                # Main text with brand color
                 draw.text((margin, y_text), product_name, 
-                         font=product_font, fill=(255, 215, 100, 255))
+                         font=product_font, fill=(255, 200, 100, 255))
         
         return img
     
