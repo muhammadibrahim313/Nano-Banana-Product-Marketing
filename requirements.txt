@@ -2,3 +2,5 @@ streamlit
 Pillow
 python-dotenv
 google-genai
+rembg==2.0.56  # optional (auto cut-out); app falls back if not available
+
