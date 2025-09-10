@@ -416,11 +416,11 @@ def render_demo_section():
         # Placeholder for YouTube video
         video_url = st.text_input(
             "YouTube Video URL",
-            value="https://www.youtube.com/watch?v=demo",
+            value="https://youtu.be/QxpwjWxxkwg?si=w9JInKKqHyduTkCO",
             disabled=True,
-            help="Demo video will be added soon"
+            help="Watch Demo video on youtube "
         )
-        st.info("🎥 Demo video coming soon! Check back later.")
+        # st.info("🎥 Demo video coming soon! Check back later.")
     
     with tab2:
         st.markdown("""
